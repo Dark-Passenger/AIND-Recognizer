@@ -68,6 +68,14 @@ class SelectorBIC(ModelSelector):
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
 
+    def bic_score(self, states : int):
+        model = self.base_model(states)
+        p = model.startprob_.size + model.transmat_.size + model.means_.size + model.covars_.diagonal().size
+        logL = model.score(self.X, self.lengths)
+        logN = np.log(self.X.shape[0])
+        score = -2 * logL + p * logN
+        return model, score
+
     def select(self):
         """ select the best model for self.this_word based on
         BIC score for n between self.min_n_components and self.max_n_components
@@ -75,9 +83,21 @@ class SelectorBIC(ModelSelector):
         :return: GaussianHMM object
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        min = self.min_n_components
+        max = self.max_n_components
+        lowest_log = math.inf
+        best_model = None
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        for n in range(min, max + 1):
+            try:
+                model, score = self.bic_score(n)
+                if score < lowest_log:
+                    lowest_log = score
+                    best_model = model
+            except:
+                pass
+
+        return best_model
 
 
 class SelectorDIC(ModelSelector):
@@ -90,11 +110,32 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    def dic_score(self, states):
+        model = self.base_model(states)
+        alpha = 0.2
+        M = len(self.words)
+        likelihood = model.score(self.X, self.lengths)
+        antilikelihood = alpha/(M-1) * math.fsum([model.score(self.hwords[w][0], self.hwords[w][1]) for w in self.words if w != self.this_word])
+        dic_score = likelihood - antilikelihood
+        return model, dic_score
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
+        min = self.min_n_components
+        max = self.max_n_components
+        lowest_log = math.inf
+        best_model = None
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        for n in range(min, max + 1):
+            try:
+                model, score = self.dic_score(n)
+                if score < lowest_log:
+                    lowest_log = score
+                    best_model = model
+            except:
+                pass
+
+        return best_model
 
 
 class SelectorCV(ModelSelector):
@@ -102,8 +143,47 @@ class SelectorCV(ModelSelector):
 
     '''
 
+    def avg_log(self, sequences, num_states: int):
+        scores = list()
+
+        if len(sequences) < 2:
+            return -math.inf, num_states
+
+        min_split = 2
+        sequence_split = int(len(sequences) * 0.7)
+        n_splits = max(min_split, sequence_split)
+
+        kf = KFold(n_splits=n_splits)
+        for train_index, test_index in kf.split(sequences):
+            try:
+                train_x, train_length = combine_sequences(train_index, sequences)
+                test_x, test_length = combine_sequences(test_index, sequences)
+                train_fitted_model = GaussianHMM(n_components=num_states, n_iter=1000).fit(train_x, train_length)
+                train_score = train_fitted_model.score(test_x, test_length)
+                scores.append(train_score)
+            except:
+                pass
+
+        if len(scores) < 1:
+            return -math.inf, num_states
+
+        return np.mean(scores), num_states
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        min = self.min_n_components
+        max = self.max_n_components
+        highest_log = -math.inf
+        best_n_components = None
+
+        for i in range(min, max + 1):
+            try:
+                avg_log, n = self.avg_log(self.sequences, i)
+                if avg_log > highest_log:
+                    highest_log = avg_log
+                    best_n_components = n
+            except:
+                pass
+
+        return self.base_model(best_n_components)

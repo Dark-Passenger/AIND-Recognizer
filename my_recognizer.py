@@ -1,4 +1,6 @@
 import warnings
+from operator import itemgetter
+import numpy as np
 from asl_data import SinglesData
 
 
@@ -20,6 +22,20 @@ def recognize(models: dict, test_set: SinglesData):
     warnings.filterwarnings("ignore", category=DeprecationWarning)
     probabilities = []
     guesses = []
-    # TODO implement the recognizer
-    # return probabilities, guesses
-    raise NotImplementedError
+    for i in list(test_set.get_all_sequences().keys()):
+        scores = list()
+        X, lengths = test_set.get_item_Xlengths(i)
+        for word, gaussian in models.items():
+            log_l = -np.inf
+            try:
+                log_l = gaussian.score(X, lengths)
+            except:
+                pass
+
+            scores.append((word, log_l))
+
+        scores = sorted(scores, key=itemgetter(1), reverse=True)  # sort by log value; descending
+
+        probabilities.append(dict(scores))  # add sorted probabilities as dict
+        guesses.append(scores[0][0])  # select first word
+        return probabilities, guesses
